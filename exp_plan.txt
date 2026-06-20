@@ -1,0 +1,86 @@
+A Kaggle P100 with 16GB VRAM is a highly capable setup for 2D medical image segmentation. While it might hit memory limits if you attempt to train a full, high-resolution 3D U-Net or a massive Vision Transformer with large batch sizes, it provides plenty of headroom for sophisticated 2D architectures, complex loss functions, and multi-phase training loops.
+
+Since you are currently in the development phase for the projection head and pixel-sampling logic, this is the perfect time to structure your pipeline to handle a few different architectural approaches.
+
+Here is a structured list of experiments designed to fit your compute constraints while directly supporting your final comparative analysis report.
+
+---
+
+### Experiment 1: The Standard Baseline
+
+This is essential to establish benchmark metrics. You need a solid foundation to prove that your proposed method actually improves performance.
+
+* **Preprocessing:** The dataset you just prepared (Hounsfield lung windowing, dropping the first 50 slices, 1:1 tumor/non-tumor ratio).
+* 
+**Architecture:** A standard U-Net encoder-decoder architecture. Input shape will be $H \times W \times 1$.
+
+
+* 
+**Training Strategy:** Train standard U-Net architectures trained with a standard Cross-Entropy or Dice loss.
+
+
+* **Compute Footprint:** Very low. You can likely use a healthy batch size (16 or 32) on a P100, which will make training fast.
+
+
+### Experiment 2: Supervised Pixel-Level Contrastive Learning (Core Proposal)
+
+This is the main focus of your project. By forcing the network to group lesion pixels tightly together in a high-dimensional embedding space while actively pushing them away from healthy background pixels, the model learns highly discriminative, robust features.
+
+* **Preprocessing:** Same as Experiment 1.
+* 
+**Architecture:** * **Backbone:** Standard U-Net outputting a dense, high-dimensional representation $H \times W \times D$.
+
+
+* 
+**Projection Head:** A small Multi-Layer Perceptron (MLP) applied pixel-wise, structured as a $1 \times 1$ convolution, a ReLU activation, and another $1 \times 1$ convolution.
+
+
+* 
+**Classification Head:** A standard $1 \times 1$ convolutional layer.
+
+
+
+
+* **Training Strategy (Two-Phase):**
+* 
+**Phase 1 (Representation Learning):** Train the U-Net and projection head using a Supervised Pixel Contrastive Loss (a variant of InfoNCE). Anchor pixels will be sampled from the lesion area. The loss function will pull these embeddings toward other lesion pixels (positives) and push them away from the healthy background pixels (negatives).
+
+
+* 
+**Phase 2 (Linear Probing):** The projection head is permanently discarded, and the U-Net encoder-decoder weights are frozen. The Classification Head is attached and trained using a standard Binary Cross-Entropy (BCE) or Dice loss for a few epochs.
+
+
+
+
+* **Compute Footprint:** Moderate. The contrastive loss in Phase 1 is memory-intensive because calculating the distances between thousands of pixel embeddings across a batch requires significant VRAM. You may need to drop your batch size to 4 or 8.
+
+### Experiment 3: The Context Upgrade (Attention U-Net)
+
+To address the concern about the model confusing tumors with surrounding tissue, swapping the baseline U-Net for an Attention U-Net forces the network to explicitly focus on the lung cavity.
+
+* **Preprocessing:** Same as Experiment 1.
+* **Architecture:** Attention U-Net. This modifies the standard architecture by adding attention gates to the skip connections, allowing the model to suppress irrelevant background regions (like bone or muscle) before concatenating features.
+* **Training Strategy:** Standard BCE or Dice loss, matching Experiment 1.
+* **Compute Footprint:** Low-to-Moderate. Attention gates add a few million parameters, but it easily fits within 16GB VRAM.
+
+### Experiment 4: Advanced Preprocessing (Lung Parenchyma Masking)
+
+Instead of changing the architecture to deal with the surrounding tissue, this experiment changes the data to completely remove the distraction.
+
+* **Preprocessing:** Before feeding the PNGs to the model, run them through an automated lung extraction tool (like the `lungmask` library in Python or a traditional OpenCV morphological/Otsu thresholding script). This will turn everything outside the lungs to pure black (0).
+* **Architecture:** Standard U-Net (same as Experiment 1).
+* **Training Strategy:** Standard BCE/Dice loss.
+* **Goal:** Compare the boundary sharpness of this model against Experiment 1 to see if explicitly removing the surrounding tissue context helps or hinders the standard network.
+
+### Experiment 5: The "2.5D" Volumetric Context Approach
+
+A full 3D U-Net is highly computationally expensive and might exceed your 16GB limit if you aren't careful with patch sizes. A fantastic compromise in medical imaging is a 2.5D approach.
+
+* **Preprocessing:** Instead of saving individual 1-channel PNGs, you stack three adjacent slices (Slice $i-1$, Slice $i$, Slice $i+1$) together to form a 3-channel image (exactly like an RGB image).
+* **Architecture:** Standard U-Net, but the input layer is modified to accept $H \times W \times 3$ instead of $H \times W \times 1$. The mask remains $H \times W \times 1$ (corresponding to the middle slice).
+* **Training Strategy:** Train using the contrastive learning two-phase approach or the standard BCE loss.
+* **Advantage:** This gives the network immediate top-to-bottom spatial context without the massive memory overhead of 3D convolutions.
+
+---
+
+Since we are currently right in the middle of the timeline window to develop the Projection Head and implement the pixel-sampling logic (extracting positive/lesion and negative/background embeddings), would you like me to write the PyTorch code for the Phase 1 pixel-sampling logic so you can get Experiment 2 running?
